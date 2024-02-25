@@ -1,0 +1,136 @@
+Drop Table if exists ToanHuynh_DA_JBPKBP_09092023 ;
+CREATE TABLE IF NOT EXISTS ToanHuynh_DA_JBPKBP_09092023 AS
+Select 
+    seller_id 
+    ,seller_short_code
+    ,main_cluster_name
+    ,main_category_name
+    ,main_category_lv2_name
+    ,seller_name
+    ,seller_segment
+    ,voucher_acqui
+    ,eli_sd_acti
+    ,rebate_sd_acti
+    ,minspend_sd_acti
+    ,maxscap_sd_acti
+    ,eli_sd_upsell
+    ,rebate_sd_upsell
+    ,minspend_sd_upsell
+    ,maxscap_sd_upsell
+    ,eli_npl_newadopt
+    ,rebate_npl_newadopt
+    ,minspend_npl_newadopt
+    ,maxscap_npl_newadopt
+    ,eli_npl_upsell
+    ,rebate_npl_upsell
+    ,minspend_npl_upsell
+    ,maxscap_npl_upsell
+    ,eli_sa_newadopt
+    ,rebate_sa_newadopt
+    ,minspend_sa_newadopt
+    ,maxscap_sa_newadopt
+    ,sd_creditspend_1d
+    ,npl_creditspend_1d
+    ,sa_cash_spend
+    ,topup_1d
+    ,ds 
+From (
+Select --- fixed data
+       x1.jbp_type
+        ,x1.seller_id
+        ,x1.seller_short_code
+        ,x1.main_cluster_name ,x1.main_category_name ,x1.main_category_lv2_name
+        ,x1.seller_name ,x1.seller_segment 
+        ,x1.voucher_acqui ,x1.eli_sd_acti ,x1.rebate_sd_acti ,x1.minspend_sd_acti ,x1.maxscap_sd_acti
+        ,x1.eli_sd_upsell ,x1.rebate_sd_upsell ,x1.minspend_sd_upsell ,x1.maxscap_sd_upsell 
+        ,x1.eli_npl_newadopt ,x1.rebate_npl_newadopt ,x1.minspend_npl_newadopt ,x1.maxscap_npl_newadopt
+        ,x1.eli_npl_upsell ,x1.rebate_npl_upsell ,x1.minspend_npl_upsell ,x1.maxscap_npl_upsell
+        ,x1.eli_sa_newadopt ,x1.rebate_sa_newadopt ,x1.minspend_sa_newadopt ,x1.maxscap_sa_newadopt 
+        --- changed data
+        ,coalesce(x2.sd_creditspend_1d,0) as sd_creditspend_1d
+        ,coalesce(x2.npl_creditspend_1d,0) as npl_creditspend_1d
+        ,coalesce(x3.sa_cash_spend,0) as sa_cash_spend
+        ,coalesce(x4.topup_1d,0) as topup_1d 
+        ,x2.ds as ds1
+        ,x3.ds as ds2
+        ,x4.ds as ds3
+        ,case 
+        when x2.ds is not null then x2.ds 
+        else x3.ds end as ds
+From 
+(
+Select jbp_type
+        ,seller_id
+        ,seller_short_code
+        ,main_cluster_name ,main_category_name ,main_category_lv2_name
+        ,seller_name ,seller_segment 
+        ,voucher_acqui ,eli_sd_acti ,rebate_sd_acti ,minspend_sd_acti ,maxscap_sd_acti
+        ,eli_sd_upsell ,rebate_sd_upsell ,minspend_sd_upsell ,maxscap_sd_upsell 
+        ,eli_npl_newadopt ,rebate_npl_newadopt ,minspend_npl_newadopt ,maxscap_npl_newadopt
+        ,eli_npl_upsell ,rebate_npl_upsell ,minspend_npl_upsell ,maxscap_npl_upsell
+        ,eli_sa_newadopt ,rebate_sa_newadopt ,minspend_sa_newadopt ,maxscap_sa_newadopt
+From lazada_analyst_dev.ms_di_nonjbpkbp_v3
+-- where seller_id = '200171148161'
+ ) x1
+Left Join (
+    Select ds 
+        ,seller_id 
+        ,sum(coalesce(sd_creditspend_1d,0)) as sd_creditspend_1d
+        ,sum(coalesce(npl_creditspend_1d,0)) as npl_creditspend_1d
+    From lazada_ads_data.dws_lzd_ad_sads_mem_spend_vn_1d
+    where venture = "VN"
+    and ds BETWEEN '20230801' and TO_CHAR(DATEADD(GETDATE(),-1,'dd'),'yyyymmdd')
+    -- and ds = "${bizdate}"
+    Group By ds 
+            ,seller_id 
+) x2
+on x1.seller_id=x2.seller_id
+Left Join (
+    Select x1.ds 
+        ,x1.seller_id
+        ,coalesce(x1.asa_cash_spend,0) + coalesce(x2.ams_cash_rev,0) as sa_cash_spend
+From 
+( Select ds 
+        ,seller_id
+        ,sum(coalesce(asa_cash_spend,0)) as asa_cash_spend 
+From lazada_ads_data.dws_lzd_ad_seller_level_cash_spend_1d
+where ds BETWEEN '20230801' and TO_CHAR(DATEADD(GETDATE(),-1,'dd'),'yyyymmdd')
+-- where ds = "${bizdate}"
+-- and seller_id = '200171148161'
+Group By ds 
+        ,seller_id
+        ) x1
+Left Join ( 
+    Select seller_id
+        ,TO_CHAR(delivery_communicate_date,'yyyymm') as ds 
+        ,case 
+        when sum(coalesce(commission_fee,0)) > 0 then sum(coalesce(commission_fee,0))
+        when sum(coalesce(commission_fee,0)) < 0 then (sum(coalesce(commission_fee,0)) * (-1) )
+        else '0' end as ams_cash_rev
+    From AMS_DASHBOARD_ALL_STATUS_BILLING_PURPOSE
+    where TO_CHAR(delivery_communicate_date,'yyyymmdd') BETWEEN '20230801' AND TO_CHAR(DATEADD(GETDATE(),-1,'dd'),'yyyymmdd')
+    -- where ds = "${bizdate}"
+    and item_status_last in ('delivered','payment_success','return_request_cancel','return_request_reject')
+    -- and seller_id = '200171148161'
+    GROUP BY seller_id
+            ,TO_CHAR(delivery_communicate_date,'yyyymm') 
+    ) x2
+ON x1.seller_id = x2.seller_id
+AND x1.ds = x2.ds 
+) x3
+ON x1.seller_id = x3.seller_id
+AND x2.ds = x3.ds 
+Left Join (
+    Select ds
+        ,seller_id
+        ,seller_name
+        ,sum(coalesce(topup_1d_vnd,0)) as topup_1d 
+From lazada_analyst_dev.vn_sd_status_and_wallet
+where ds BETWEEN '20230901' and TO_CHAR(DATEADD(GETDATE(),-1,'dd'),'yyyymmdd')
+Group By ds
+        ,seller_id
+        ,seller_name
+        ) x4
+ON x1.seller_id = x4.seller_id
+AND x2.ds = x4.ds 
+)
